@@ -1,0 +1,91 @@
+1.  figure out whats going on with schema.hs and the PasteRequrest type in Api.hs and see how to do that here
+        -pasterequest
+            -carries one text element
+            -of the ToJson and FromJson typeclass
+            -given as argument to postJson
+            -used for sending post to server from client
+            -is the cargo that gets sent as json to the server
+        -paste
+            -passed as argument to Id type
+            -holds a text value
+            -typeclass hasid
+            -used for retrieving a post from the server.
+2.  figure out how to handle image upload
+3.  make the githup repo so I can get my green squares
+4.  writout the backend
+5.  make the front end
+
+
+
+*Frontend routes
+    **main
+        -text input to create a post
+            - button for image upload
+            - button for post
+            - backend route MkPost (post)
+        -list of posts
+            - image on left post on right
+            - up to 3 comments on post
+            - click on post to view full
+              -chgroute viewpost (postId)
+    **vewPost(postId)
+        -image on top left
+        -entire post
+        -list of comments
+            -image on left
+            -post id and timestamp on top
+                -clicking post id scrolls down and shifts focus to the add comment text box and adds >>[id]
+            -text of comment
+                -if comment contains a >>[id], it is a link to that post
+        -text box to add comment
+            -can add >>[id]
+
+
+
+
+data Post
+    =Op OpId Image Text
+    |Comment ComId OpId Maybe Image Text
+
+data PostId~
+    =OpId int
+    |ComId int
+
+
+
+
+
+CREATE TABLE posts (
+    id           SERIAL PRIMARY KEY
+    image        BOOL // false if no image true if image, images will be saved as id in static
+    content      TEXT // allowing nullability and controlling it on backend depending on route
+    op           INTEGER // id field of OP, null if it is OP
+)
+
+
+on mkpost route
+         if user is starting a new thread:
+            content is required
+            image is required
+            op is NULL
+        else if user is commenting on thread:
+            content OR image can be null, not both
+            op is ID of op
+backendroutes case
+    NewTh -> ensure that content is not null, image is true, and op is NULL
+    NewCom -> ensure that op is the id of the current thread, and either image or text is null, not both
+    ListPosts :/ int-> select next [int] posts where op = null sorted by most recent
+    GetPost :/ key-> if ther is a post with that id
+        case op = null -> return list with post and all posts with op=key
+        else = return op thread and tell frontend to scroll to comment and highlight it.
+
+
+frontendroutes case
+    Main -> render header
+            new thread box
+                submit button underneath calls to NewTh
+            render results of ListPosts
+    ViewPost -> render header
+                render results of GetPost
+                text input box for comments
+                    submit button clls to NewCom
