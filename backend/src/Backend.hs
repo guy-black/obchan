@@ -27,7 +27,15 @@ maxPostSize = 10000 --in bytes
 
 migration :: Query
 migration = "CREATE TABLE IF NOT EXISTS posts\
-  \ (id SERIAL PRIMARY KEY, image BOOL, content TEXT, op INTEGER, datetime TIMESTAMP)"
+  \ (id SERIAL PRIMARY KEY, image BOOL NOT NULL, content TEXT, op INTEGER, datetime TIMESTAMP)"
+
+--tfw something goes wrong and you just want to go hom
+whoopsie :: Snap ()
+whoopsie =
+  S.redirect $
+    encodeUtf8 $
+      renderFrontendRoute R.checkedFullRouteEncoder $
+        R.FrountedRoute_Main :/ ()
 
 backend :: Backend BackendRoute FrontendRoute
 backend = Backend
@@ -38,29 +46,43 @@ backend = Backend
         _ <- withResource pool $ \dbcon -> execute_ dbcon migration
         serve $ \case -- \case::(R backendRoute -> Snap ())
           R.BackendRoute_NewTh :/ () -> do
-            Just thread <- A.decode <$> S.readRequestBody maxPasteSize
-            --todo, a function to check that content is not null, and image is true
-            [[key]] <- liftIO $
-              withResource pool $ \dbcon ->
-                query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?) RETURNING id" ((_postRequest_image thread) :: Bool, (_postRequest_content thread) :: (Maybe Text),Nothing :: (Maybe Int64))
-            S.modifyResponse $ S.setResponseStatus 200 "OK"
-            S.writeBS $ toStrict $ A.encode (key :: Int)
+            thread <- A.decode <$> S.readRequestBody maxPasteSize
+            \case (thread :: Maybe PostRequest) of
+              (Just (PostRequest True (Just t) Nothing)) -> -- checks if it has text and picture and no OP
+                [[key]] <- liftIO $
+                  withResource pool $ \dbcon ->
+                    query dbcon "INSERT INTO posts (image,content,op) VALUES (TRUE,?,NULL) RETURNING id" [t :: Text] 
+                S.modifyResponse $ S.setResponseStatus 200 "OK"
+                S.writeBS $ toStrict $ A.encode (key :: Int)
+              _ -> whoopsie           
           R.BackendRoute_NewCom :/ () -> do
-            --handle new comment
+            comment <- A.decode <$> S.readRequestBody maxPasteSize
+            \case (comment :: Maybe PostRequest) of
+              Nothing -> --incase decode failed -- reject
+              (Just (PostRequest _ _ Nothing)) -> --in case the comment has no OP value -- reject
+              (Just (PostRequest False Nothing _)) -> --in case image is false AND content is blank -- reject
+              (Just (PostRequest i c (Just o))) -> --not Nothing, has an Op, image is true and/or content is there -- accept 
           R.BackendRoute_ListPosts :/ () -> do
-            --return list of posts
+            postOrder <- A.decode <$> S.readRequestBody maxPostSize --todo: it probably doesnt need a max 10000 bytes but I want to lessen the initial list of things I did wrong, will fix later
+            \case (postOrder :: Maybe (Int,Int)) of -- (placeinthreadlist,numberofpoststoshow)
+              (Just (p,n)) ->
+                postList <- liftIO $
+                  withResource pool $ \dbcon ->
+                    -- select * from posts Where OP is Null; sort by most recent, skip the first p, return the next n
+                    query dbcon "SELECT (id,image,content,datetime) FROM posts WHERE op = NULL\
+                      \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
+                case (postOrder :: [(Int64,Bool,Text,Text)]) of
+                  [(id,i,c,d)] -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing d]
+                  _ -> whoopsie
+              _ -> whoopsie
           R.BackendRoute_GetPost :/ key -> do
             result <- liftIO $
               withResource pool $ \dbcon ->
                 query dbcon "SELECT (image,content,op,datetime) FROM posts WHERE id = ?" [unId key]
-            case (result :: (Bool,(Maybe Text),(Maybe Int64),Text)) of
+            case (result :: [(Bool,(Maybe Text),(Maybe Int64),Text)]) of
               [(i,c,o,d)] -> S.writeBS $ toStrict $ A.encode $ PostResponse key i c o d   --if the post is real
               _ -> S.modifyResponse $ S.setResponseStatus 404 "Not Found" --if its not found   
-          _ -> --else
-            S.redirect $
-              encodeUtf8 $
-                renderFrontendRoute R.checkedFullRouteEncoder $
-                  R.FrountedRoute_Main :/ ()
+          _ -> whoopsie
       return () -- -> IO ()
   , _backend_routeEncoder = R.fullRouteEncoder
   }

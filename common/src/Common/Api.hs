@@ -16,8 +16,8 @@ import Common.Schema (Post(..))
 import Database.Id.Class (Id(..))
 
 data PostRequest = PostRequest {
-                 _postRequest_content :: Maybe Text
-                ,_postRequest_image :: Bool
+                 _postRequest_image :: Bool
+                ,_postRequest_content :: Maybe Text
                 ,_postRequest_op :: Maybe (Id Post)
                 }
   deriving stock Generic deriving data (ToJSON, FromJSON)
