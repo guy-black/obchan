@@ -58,17 +58,22 @@ backend = Backend
           R.BackendRoute_NewCom :/ () -> do
             comment <- A.decode <$> S.readRequestBody maxPasteSize
             \case (comment :: Maybe PostRequest) of
-              Nothing -> --incase decode failed -- reject
-              (Just (PostRequest _ _ Nothing)) -> --in case the comment has no OP value -- reject
-              (Just (PostRequest False Nothing _)) -> --in case image is false AND content is blank -- reject
-              (Just (PostRequest i c (Just o))) -> --not Nothing, has an Op, image is true and/or content is there -- accept 
+              Nothing -> whoopsie --incase decode failed -- reject
+              (Just (PostRequest _ _ Nothing)) -> whoopsie --in case the comment has no OP value -- reject
+              (Just (PostRequest False Nothing _)) -> whoopsie --in case image is false AND content is blank -- reject
+              (Just (PostRequest i c (Just o))) -> --not Nothing, has an Op, image is true and/or content is there -- accept
+                [[thKey]] <- liftIO $
+                  withResource pool $ \dbcon ->
+                    query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?)" (i :: Bool,c :: Maybe Text,o :: Int64)
+                S.modifyResponse $ S.setResponseStatus 200 "OK"
+                S.writeBS $ toStrict $ A.encode (thKey :: Int)
           R.BackendRoute_ListPosts :/ () -> do
             postOrder <- A.decode <$> S.readRequestBody maxPostSize --todo: it probably doesnt need a max 10000 bytes but I want to lessen the initial list of things I did wrong, will fix later
             \case (postOrder :: Maybe (Int,Int)) of -- (placeinthreadlist,numberofpoststoshow)
               (Just (p,n)) ->
                 postList <- liftIO $
                   withResource pool $ \dbcon ->
-                    -- select * from posts Where OP is Null; sort by most recent, skip the first p, return the next n
+                    -- select from posts Where OP is Null; sort by most recent, skip the first p, return the next n
                     query dbcon "SELECT (id,image,content,datetime) FROM posts WHERE op = NULL\
                       \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
                 case (postOrder :: [(Int64,Bool,Text,Text)]) of
