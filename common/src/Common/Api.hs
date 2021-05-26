@@ -26,6 +26,10 @@ data PostRequest = PostRequest {
 commonStuff :: String
 commonStuff = "Here is a string defined in Common.Api"
 
+data PostFetch = PostFetch {
+                  _page :: Int
+                 ,_amount :: Int
+                 }
 
 data PostResponse = PostResponse {
                   _postResponse_id :: (Id Post)

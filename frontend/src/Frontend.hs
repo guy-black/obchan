@@ -71,20 +71,21 @@ postInput pt = do
       leftmost [Loading <$ click, Loaded <$> switchDyn request]
   pure state
 
-createRoute :: PostType -> Text
-createRoute pt =
-  case pt of
-    Thread -> renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewTh :/ ()
-    Comment -> renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewCom :/ ()
+threadRoute :: Text
+threadRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewTh :/ ()
+commentRoute :: Text
+commentRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewCom :/ ()
+listRoute :: Text
+listRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_ListPosts :/ ()
 
 threadRequest :: Text -> XhrRequest Text
-threadRequest s = postJson createRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
+threadRequest s = postJson threadRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
 
 commentRequest :: Text -> Id Post -> XhrRequest Text
-commentRequest s postId = postJson createRoute (PostRequest False s (Just postId)) --forcing image false
+commentRequest s postId = postJson commentRoute (PostRequest False s (Just postId)) --forcing image false
 
 viewPlaceholder :: AppWidget js t m => m () -- loading screen
-viewPlaceholder = text "Loading paste..."
+viewPlaceholder = text "Loading post..."
 
 viewWholeThread :: WidgetWithJS js t m => Dynamic t (Id Post) -> m () -------finish this
 viewWholeThread postId = do
@@ -96,6 +97,17 @@ stateToMaybeKey :: State -> Maybe Int64
 stateToMaybeKey = \case
   Loaded key -> key
   _ -> Nothing
+
+
+
+viewThreadList :: [PostResponse]
+viewThreadList = postJson listRoute (PostFetch 0 20)-- need to make a type of typeclass to json to hold to ints
+  
+
+renderPost :: AppWidget js t m => PostResponse -> m ()
+renderPost p = do
+  text $ _postResponse_datetime p
+  text $ _postResponse_content p
 
 app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R FrontendRoute) m ()
 app =
