@@ -34,7 +34,7 @@ frontendroutes case
     ViewPost -> render header
                 render results of GetPost
                 text input box for comments
-                    submit button clls to NewCom
+                    submit button calls to NewCom
 
 -pasterequest
     -carries one text element

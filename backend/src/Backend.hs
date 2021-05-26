@@ -8,6 +8,7 @@ module Backend where
 
 import qualified Common.Route as R
 import Common.Api
+import Common.Schema
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as A
 import Data.ByteString.Lazy (toStrict)
@@ -30,14 +31,14 @@ migration = "CREATE TABLE IF NOT EXISTS posts\
   \ (id SERIAL PRIMARY KEY, image BOOL NOT NULL, content TEXT, op INTEGER, datetime TIMESTAMP)"
 
 --tfw something goes wrong and you just want to go hom
-whoopsie :: Snap ()
+whoopsie :: S.Snap ()
 whoopsie =
   S.redirect $
     encodeUtf8 $
       renderFrontendRoute R.checkedFullRouteEncoder $
-        R.FrountedRoute_Main :/ ()
+        R.FrontendRoute_Main :/ ()
 
-backend :: Backend BackendRoute FrontendRoute
+backend :: Backend R.BackendRoute R.FrontendRoute
 backend = Backend
 --_backend_run :: ((R backendRoute -> Snap ()) -> IO ()) -> IO ()
   { _backend_run = \serve -> do -- \serve :: (R backendRoute -> Snap ()) -> IO ()
@@ -46,9 +47,9 @@ backend = Backend
         _ <- withResource pool $ \dbcon -> execute_ dbcon migration
         serve $ \case -- \case::(R backendRoute -> Snap ())
           R.BackendRoute_NewTh :/ () -> do
-            thread <- A.decode <$> S.readRequestBody maxPasteSize
-            \case (thread :: Maybe PostRequest) of
-              (Just (PostRequest True (Just t) Nothing)) -> -- checks if it has text and picture and no OP
+            thread <- A.decode <$> S.readRequestBody maxPostSize
+            case (thread :: Maybe PostRequest) of
+              (Just (PostRequest True (Just t) Nothing)) -> do -- checks if it has text and picture and no OP
                 [[key]] <- liftIO $
                   withResource pool $ \dbcon ->
                     query dbcon "INSERT INTO posts (image,content,op) VALUES (TRUE,?,NULL) RETURNING id" [t :: Text] 
@@ -56,37 +57,53 @@ backend = Backend
                 S.writeBS $ toStrict $ A.encode (key :: Int)
               _ -> whoopsie           
           R.BackendRoute_NewCom :/ () -> do
-            comment <- A.decode <$> S.readRequestBody maxPasteSize
-            \case (comment :: Maybe PostRequest) of
+            comment <- A.decode <$> S.readRequestBody maxPostSize
+            case (comment :: Maybe PostRequest) of
               Nothing -> whoopsie --incase decode failed -- reject
               (Just (PostRequest _ _ Nothing)) -> whoopsie --in case the comment has no OP value -- reject
               (Just (PostRequest False Nothing _)) -> whoopsie --in case image is false AND content is blank -- reject
-              (Just (PostRequest i c (Just o))) -> --not Nothing, has an Op, image is true and/or content is there -- accept
+              (Just (PostRequest i c (Just o))) -> do --not Nothing, has an Op, image is true and/or content is there -- accept
                 [[thKey]] <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?)" (i :: Bool,c :: Maybe Text,o :: Int64)
+                    query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?)" (i :: Bool,c :: Maybe Text,o :: (Id Post))
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
                 S.writeBS $ toStrict $ A.encode (thKey :: Int)
           R.BackendRoute_ListPosts :/ () -> do
             postOrder <- A.decode <$> S.readRequestBody maxPostSize --todo: it probably doesnt need a max 10000 bytes but I want to lessen the initial list of things I did wrong, will fix later
-            \case (postOrder :: Maybe (Int,Int)) of -- (placeinthreadlist,numberofpoststoshow)
-              (Just (p,n)) ->
+            case (postOrder :: Maybe (Int,Int)) of -- (placeinthreadlist,numberofpoststoshow)
+              (Just (p,n)) -> do
                 postList <- liftIO $
                   withResource pool $ \dbcon ->
                     -- select from posts Where OP is Null; sort by most recent, skip the first p, return the next n
                     query dbcon "SELECT (id,image,content,datetime) FROM posts WHERE op = NULL\
                       \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
-                case (postOrder :: [(Int64,Bool,Text,Text)]) of
+                case (postOrder :: [((Id Post),Bool,Text,Text)]) of
                   [(id,i,c,d)] -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing d]
                   _ -> whoopsie
               _ -> whoopsie
           R.BackendRoute_GetPost :/ key -> do
-            result <- liftIO $
+            op <- liftIO $
               withResource pool $ \dbcon ->
-                query dbcon "SELECT (image,content,op,datetime) FROM posts WHERE id = ?" [unId key]
-            case (result :: [(Bool,(Maybe Text),(Maybe Int64),Text)]) of
-              [(i,c,o,d)] -> S.writeBS $ toStrict $ A.encode $ PostResponse key i c o d   --if the post is real
-              _ -> S.modifyResponse $ S.setResponseStatus 404 "Not Found" --if its not found   
+                query dbcon "SELECT op FROM posts WHERE id = ?" [unId key]
+            case (op :: [[(Maybe (Id Post))]]) of
+              [[Nothing]] -> --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
+                thread <- lifIO $
+                  withResource pool $ \dbcon ->
+                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
+                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)])
+                  [(id,i,c,o,d)] -> -- thread found
+                    S.writeBS $ toStrict $ A.encode $ PosteResponse id i c o d
+                  _ -> -- not found
+                    S.modifyResponse $ S.setResponseStatus 404 "Not Found"
+              [[(Just threadId)]] -> --this is a comment, return it's op
+                thread <- liftIO $
+                  withResource pool $ \dbcon ->
+                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId threadId,unId threadId)
+                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)])
+                  [(id,i,c,o,d)] -> -- thread found
+                    S.writeBS $ toStrict $ A.encode $ PosteResponse id i c o d
+                  _ -> -- not found
+                    S.modifyResponse $ S.setResponseStatus 404 "Not Found"
           _ -> whoopsie
       return () -- -> IO ()
   , _backend_routeEncoder = R.fullRouteEncoder

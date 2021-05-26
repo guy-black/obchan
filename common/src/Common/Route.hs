@@ -27,7 +27,7 @@ data BackendRoute :: * -> * where
   BackendRoute_Missing :: BackendRoute () -- Used to handle unparseable routes.
   BackendRoute_NewTh :: BackendRoute () -- to make a new thread
   BackendRoute_NewCom :: BackendRoute () -- to make a new comment
-  BackendRoute_ListPosts :: BackenRoute () -- to get recent posts
+  BackendRoute_ListPosts :: BackendRoute () -- to get recent posts
   BackendRoute_GetPost :: BackendRoute (Id Post) -- to get a single thread
 
 data FrontendRoute :: * -> * where
@@ -48,11 +48,11 @@ fullRouteEncoder = mkFullRouteEncoder
       BackendRoute_NewTh -> PathSegment "thread" $ unitEncoder mempty
       BackendRoute_NewCom -> PathSegment "comment" $ unitEncoder mempty
       BackendRoute_ListPosts -> PathSegment "list" $ unitEncoder mempty
-      BackendRoute_GetPost -> PathSegment "post" idPashSegmentEncoder
+      BackendRoute_GetPost -> PathSegment "post" idPathSegmentEncoder
       BackendRoute_Missing -> PathSegment "missing" $ unitEncoder mempty)
   (\case
       FrontendRoute_Main -> PathEnd $ unitEncoder mempty
-      FrontendRoute_ViewPost -> PathSegment "p" idPathSegmnentEncoder)
+      FrontendRoute_ViewPost -> PathSegment "p" idPathSegmentEncoder)
 
 concat <$> mapM deriveRouteComponent
   [ ''BackendRoute
