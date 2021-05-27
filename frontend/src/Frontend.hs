@@ -45,12 +45,16 @@ data State = NotStarted | Loading | Loaded (Maybe Int64)
   deriving (Eq)
 
 data PostType = Comment Id Post | Thread
-
+--helper functions
 postAttrs :: State -> M.Map Text Text
 postAttrs = \case
   Loading -> ("disabled" =: "true")
   _ -> mempty
-
+stateToMaybeKey :: State -> Maybe Int64
+stateToMaybeKey = \case
+  Loaded key -> key
+  _ -> Nothing
+--post input widget
 postInput :: AppWidget js t m => PostType -> m (Dynamic t State)
 postInput pt = do
   rec
@@ -70,44 +74,43 @@ postInput pt = do
     state <- holdDyn NotStarted $
       leftmost [Loading <$ click, Loaded <$> switchDyn request]
   pure state
-
+--shortcuts for the routes were gonnna use
 threadRoute :: Text
 threadRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewTh :/ ()
 commentRoute :: Text
 commentRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewCom :/ ()
 listRoute :: Text
 listRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_ListPosts :/ ()
-
+postRoute :: Id Post -> Text
+postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_GetPost :/ postId
+--routes we postJson to
 threadRequest :: Text -> XhrRequest Text
 threadRequest s = postJson threadRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
-
 commentRequest :: Text -> Id Post -> XhrRequest Text
 commentRequest s postId = postJson commentRoute (PostRequest False s (Just postId)) --forcing image false
-
-viewPlaceholder :: AppWidget js t m => m () -- loading screen
-viewPlaceholder = text "Loading post..."
-
-viewWholeThread :: WidgetWithJS js t m => Dynamic t (Id Post) -> m () -------finish this
-viewWholeThread postId = do
-  onload <- getPostBuild
-  initialLoad <- getAndDecode $ getPostUrl <$> tag (current postId) onload
-  widgetHold_ viewPlaceholder (showPost Result <$> initialLoad)
-
-stateToMaybeKey :: State -> Maybe Int64
-stateToMaybeKey = \case
-  Loaded key -> key
-  _ -> Nothing
-
-
-
-viewThreadList :: [PostResponse]
-viewThreadList = postJson listRoute (PostFetch 0 20)-- need to make a type of typeclass to json to hold to ints
-  
-
+fetchThreads :: PostFetch ->  XhrRequest Text 
+fetchThreads pf= postJson listRoute pf --pf 0 20
+--decode functions
+decodeThreadList :: PostFetch -> [PostResponse]
+decodeThreadList pf = decodeXhrResponse <$> performRequestAsync (fetchThreads pf)
+decodeThread :: Id Post -> [PostResponse]
+decodeThread postId = getAndDecode $ postRoute postId
+--render functions
+----render an individual post
 renderPost :: AppWidget js t m => PostResponse -> m ()
 renderPost p = do
   text $ _postResponse_datetime p
   text $ _postResponse_content p
+----loading screen
+viewPlaceholder :: AppWidget js t m => m ()
+viewPlaceholder = text "Loading post..."
+----show a thread - OP and comments
+------todo: check if postId matches first post in [postResponse], otherwise highlight comment with id postId
+viewWholeThread :: AppWidget js t m => Post Id -> [PostResponse] -> m ()
+viewWholeThread postId l = Map renderPost l
+----show main list of threads
+viewThreadList :: AppWidget js t m => [PostResponse] -> m ()
+viewThreadList l = Map renderPost l
 
 app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R FrontendRoute) m ()
 app =
@@ -116,19 +119,16 @@ app =
       state <- postInput $ Thread
       prerender_
         viewPlaceholder -- loading screen
-        (viewThreadList) --list of posts
+        (viewThreadList (decodeThreadList PostFetch 0 20)) --list of posts
+        --todo allow users to change page or number of posts per page
       setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (stateToMaybeKey <$> updated state)
     FrontendRoute_ViewPost -> do
       postId <- askRoute
-      --BackendRoute_GetPost :/ postId will return list of posts
-      --case first post id == postId and Op is Nothing
-        --true -> postId is thread op, format thread like regular
-        --false -> postId is a comment in the thread
-                --on load, scroll to comment with id postId and highlight it
       state <- postInput $ Comment postId
       prerender_
         viewPlaceholder -- loading screen
-        (viewWholeThread postId) --thread
+        (viewWholeThread postId (decodeThread postId)) --post and comments
+        --todo : idk but this just seems messy
 -- This runs in a monad that can be run on the client or the server.
 -- To run code in a pure client or pure server context, use one of the
 -- `prerender` functions.

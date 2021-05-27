@@ -30,6 +30,7 @@ data PostFetch = PostFetch {
                   _page :: Int
                  ,_amount :: Int
                  }
+  deriving stock Generic deriving (ToJSON, FromJSON)                 
 
 data PostResponse = PostResponse {
                   _postResponse_id :: (Id Post)
@@ -37,5 +38,4 @@ data PostResponse = PostResponse {
                  ,_postResponse_content :: (Maybe Text)
                  ,_postResponse_op :: (Maybe (Id Post))
                  ,_postResponse_datetime :: Text}
-
   deriving stock Generic deriving (ToJSON, FromJSON) -- todo: figure out what this line means

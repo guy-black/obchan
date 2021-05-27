@@ -6,12 +6,11 @@ This will be a simple *chan styled image board with heavily commented code when 
  - Routes -first try
  - Database -first try
  - Backend -first try
- 
-### Current project
  - barebones frontend -first try
-  
+
+### Current project
+ - get first try to compile
 ### TODO
- - get first stage to compile
  - Enable images
  - >greentext
  - link to comment with >>[id number]
