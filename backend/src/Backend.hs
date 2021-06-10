@@ -77,31 +77,31 @@ backend = Backend
                     -- select from posts Where OP is Null; sort by most recent, skip the first p, return the next n
                     query dbcon "SELECT (id,image,content,datetime) FROM posts WHERE op = NULL\
                       \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
-                case (postOrder :: [((Id Post),Bool,Text,Text)]) of
-                  [(id,i,c,d)] -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing d]
+                case (postList :: [((Id Post),Bool,Text,Text)]) of
+                  [(id,i,c,d)] -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i (Just c) Nothing d]
                   _ -> whoopsie
               _ -> whoopsie
           R.BackendRoute_GetPost :/ key -> do
             op <- liftIO $
               withResource pool $ \dbcon ->
                 query dbcon "SELECT op FROM posts WHERE id = ?" [unId key]
-            case (op :: [[(Maybe (Id Post))]]) of
-              [[Nothing]] -> --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
-                thread <- lifIO $
+            case (op :: [[Maybe (Id Post)]]) of
+              [[Nothing]] -> do --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
+                thread <- liftIO $
                   withResource pool $ \dbcon ->
                     query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
-                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)])
-                  [(id,i,c,o,d)] -> -- thread found
-                    S.writeBS $ toStrict $ A.encode $ PosteResponse id i c o d
-                  _ -> -- not found
+                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)]) of
+                  [(id,i,c,o,d)] -> do -- thread found
+                    S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
+                  _ -> do -- not found
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-              [[(Just threadId)]] -> --this is a comment, return it's op
+              [[(Just threadId)]] -> do --this is a comment, return it's op
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
                     query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId threadId,unId threadId)
-                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)])
+                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)]) of
                   [(id,i,c,o,d)] -> -- thread found
-                    S.writeBS $ toStrict $ A.encode $ PosteResponse id i c o d
+                    S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
                   _ -> -- not found
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
           _ -> whoopsie
