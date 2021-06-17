@@ -65,7 +65,7 @@ backend = Backend
               (Just (PostRequest i c (Just o))) -> do --not Nothing, has an Op, image is true and/or content is there -- accept
                 [[thKey]] <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?)" (i :: Bool,c :: Maybe Text,o :: (Id Post))
+                    query dbcon "INSERT INTO posts (image,content,op) VALUES (?,?,?) RETURNIN id" (i :: Bool,c :: Maybe Text, unId o )
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
                 S.writeBS $ toStrict $ A.encode (thKey :: Int)
           R.BackendRoute_ListPosts :/ () -> do
@@ -77,7 +77,7 @@ backend = Backend
                     -- select from posts Where OP is Null; sort by most recent, skip the first p, return the next n
                     query dbcon "SELECT (id,image,content,datetime) FROM posts WHERE op = NULL\
                       \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
-                case (postList :: [((Id Post),Bool,Text,Text)]) of
+                case (postList :: [(Int,Bool,Text,Text)]) of
                   [(id,i,c,d)] -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i (Just c) Nothing d]
                   _ -> whoopsie
               _ -> whoopsie
@@ -85,12 +85,12 @@ backend = Backend
             op <- liftIO $
               withResource pool $ \dbcon ->
                 query dbcon "SELECT op FROM posts WHERE id = ?" [unId key]
-            case (op :: [[Maybe (Id Post)]]) of
+            case (op :: [[Maybe Int]]) of
               [[Nothing]] -> do --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
                     query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
-                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)]) of
+                case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Text)]) of
                   [(id,i,c,o,d)] -> do -- thread found
                     S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
                   _ -> do -- not found
@@ -98,8 +98,8 @@ backend = Backend
               [[(Just threadId)]] -> do --this is a comment, return it's op
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId threadId,unId threadId)
-                case (thread :: [(Id Post,Bool,(Maybe Text),(Maybe (Id Post)),Text)]) of
+                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (threadId,threadId)
+                case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Text)]) of
                   [(id,i,c,o,d)] -> -- thread found
                     S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
                   _ -> -- not found
