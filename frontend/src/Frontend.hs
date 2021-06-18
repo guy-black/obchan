@@ -44,7 +44,7 @@ type WidgetWithJS js t m =
 data State = NotStarted | Loading | Loaded (Maybe Int64)
   deriving (Eq)
 
-data PostType = Comment Id Post | Thread
+data PostType = Comment (Id Post) | Thread
 --helper functions
 postAttrs :: State -> M.Map Text Text
 postAttrs = \case
@@ -63,16 +63,21 @@ postInput pt = do
       elDynAttr' "button" (postAttrs <$> state) $ text "create new thread"
     let click = domEvent Click postBtn
     let post = tag (current $ _textAreaElement_value inputEl) click
-    request <- prerender
-      case pf of
-        Comment postId ->
+    case pt of
+      Comment postId -> do
+        request <- prerender
           (pure never)
           (fmap decodeXhrResponse <$> performRequestAsync (commentRequest <$> post postId))
-        Thread ->
+        state <- holdDyn NotStarted $
+          leftmost [Loading <$ click, Loaded <$> switchDyn request]
+        () --i don't get why ghc is making me add this
+      Thread -> do
+        request <- prerender
           (pure never)
           (fmap decodeXhrResponse <$> performRequestAsync (threadRequest <$> post))
-    state <- holdDyn NotStarted $
-      leftmost [Loading <$ click, Loaded <$> switchDyn request]
+        state <- holdDyn NotStarted $
+          leftmost [Loading <$ click, Loaded <$> switchDyn request]
+        () -- it said do blocks must end with an expression
   pure state
 --shortcuts for the routes were gonnna use
 threadRoute :: Text
@@ -85,9 +90,9 @@ postRoute :: Id Post -> Text
 postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_GetPost :/ postId
 --routes we postJson to
 threadRequest :: Text -> XhrRequest Text
-threadRequest s = postJson threadRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
+threadRequest s = postJson threadRoute (PostRequest True (Just s) Nothing) --forcing image true until I actually figure it out
 commentRequest :: Text -> Id Post -> XhrRequest Text
-commentRequest s postId = postJson commentRoute (PostRequest False s (Just postId)) --forcing image false
+commentRequest s postId = postJson commentRoute (PostRequest False (Just s) (Just postId)) --forcing image false
 fetchThreads :: PostFetch ->  XhrRequest Text 
 fetchThreads pf= postJson listRoute pf --pf 0 20
 --decode functions
@@ -106,7 +111,7 @@ viewPlaceholder :: AppWidget js t m => m ()
 viewPlaceholder = text "Loading post..."
 ----show a thread - OP and comments
 ------todo: check if postId matches first post in [postResponse], otherwise highlight comment with id postId
-viewWholeThread :: AppWidget js t m => Post Id -> [PostResponse] -> m ()
+viewWholeThread :: AppWidget js t m => Id Post -> [PostResponse] -> m ()
 viewWholeThread postId l = Map renderPost l
 ----show main list of threads
 viewThreadList :: AppWidget js t m => [PostResponse] -> m ()
