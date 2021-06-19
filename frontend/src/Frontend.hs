@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE GADTs #-}
 module Frontend where
 
 import GHC.Int
@@ -104,7 +105,7 @@ commentRequest postId s = postJson commentRoute (PostRequest False (Just s) (Jus
 fetchThreads :: PostFetch ->  XhrRequest Text 
 fetchThreads pf= postJson listRoute pf --pf 0 20
 --decode functions
-decodeThreadList :: PostFetch -> [Maybe PostResponse]
+--decodeThreadList :: PostFetch -> [Maybe PostResponse]
 decodeThreadList pf = decodeXhrResponse <$> performRequestAsync (fetchThreads <$> pf) --need to wrap pf in an event
 decodeThread :: Id Post -> [PostResponse]
 decodeThread postId = getAndDecode $ postRoute postId
@@ -114,8 +115,8 @@ renderPost :: AppWidget js t m => Maybe PostResponse -> m ()
 renderPost p = do
   case p of
     Just po ->
-      text $ _postResponse_datetime p
-      text $ _postResponse_content p
+      text $ _postResponse_datetime po
+      text $ _postResponse_content po
     _ -> text $ "uhhhhhh oops"
 ----loading screen
 viewPlaceholder :: AppWidget js t m => m ()
@@ -123,24 +124,24 @@ viewPlaceholder = text "Loading post..."
 ----show a thread - OP and comments
 ------todo: check if postId matches first post in [postResponse], otherwise highlight comment with id postId
 viewWholeThread :: AppWidget js t m => Id Post -> [PostResponse] -> m ()
-viewWholeThread postId l = Map renderPost l
+viewWholeThread postId l = map renderPost l
 ----show main list of threads
 viewThreadList :: AppWidget js t m => [Maybe PostResponse] -> m ()
-viewThreadList l = Map renderPost l
+viewThreadList l = map renderPost l
 
 app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R FrontendRoute) m ()
 app =
   subRoute_ $ \case
     FrontendRoute_Main -> do
-      state <- postInput $ Thread
+      state <- threadInput
       prerender_
         viewPlaceholder -- loading screen
-        (viewThreadList (decodeThreadList updated $ constDyn (PostFetch 0 20))) --list of posts
+        (viewThreadList (decodeThreadList getPostBuild (PostFetch 0 20))) --list of posts
         --todo allow users to change page or number of posts per page
       setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (stateToMaybeKey <$> updated state)
     FrontendRoute_ViewPost -> do
       postId <- askRoute
-      state <- postInput $ Comment postId
+      state <- commentInput $ postId
       prerender_
         viewPlaceholder -- loading screen
         (viewWholeThread postId (decodeThread postId)) --post and comments
