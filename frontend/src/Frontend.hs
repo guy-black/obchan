@@ -54,31 +54,39 @@ stateToMaybeKey :: State -> Maybe Int64
 stateToMaybeKey = \case
   Loaded key -> key
   _ -> Nothing
---post input widget
-postInput :: AppWidget js t m => PostType -> m (Dynamic t State)
-postInput pt = do
+
+--thread input widget
+threadInput :: AppWidget js t m => m (Dynamic t State)
+threadInput = do
   rec
     inputEl <- textAreaElement def
     (postBtn, _) <- elAttr "span" ("id" =: "post") $
-      elDynAttr' "button" (postAttrs <$> state) $ text "create new thread"
+      elDynAttr' "button" (postAttrs <$> state) $ text "start a thread"
     let click = domEvent Click postBtn
     let post = tag (current $ _textAreaElement_value inputEl) click
-    case pt of
-      Comment postId -> do
-        request <- prerender
-          (pure never)
-          (fmap decodeXhrResponse <$> performRequestAsync (commentRequest <$> post postId))
-        state <- holdDyn NotStarted $
-          leftmost [Loading <$ click, Loaded <$> switchDyn request]
-        () --i don't get why ghc is making me add this
-      Thread -> do
-        request <- prerender
-          (pure never)
-          (fmap decodeXhrResponse <$> performRequestAsync (threadRequest <$> post))
-        state <- holdDyn NotStarted $
-          leftmost [Loading <$ click, Loaded <$> switchDyn request]
-        () -- it said do blocks must end with an expression
+    request <- prerender
+      (pure never)
+      (fmap decodeXhrResponse <$> performRequestAsync (threadRequest <$> post))
+    state <- holdDyn NotStarted $
+      leftmost [Loading <$ click, Loaded <$> switchDyn request]
   pure state
+
+--comment input widget
+commentInput :: AppWidget js t m => (Id Post) -> m (Dynamic t State)
+commentInput postId = do
+  rec
+    inputEl <- textAreaElement def
+    (postBtn, _) <- elAttr "span" ("id" =: "post") $
+      elDynAttr' "button" (postAttrs <$> state) $ text "add a comment"
+    let click = domEvent Click postBtn
+    let post = tag (current $ _textAreaElement_value inputEl) click
+    request <- prerender
+      (pure never)
+      (fmap decodeXhrResponse <$> performRequestAsync ((commentRequest postId) <$> post))
+    state <- holdDyn NotStarted $
+      leftmost [Loading <$ click, Loaded <$> switchDyn request]
+  pure state
+
 --shortcuts for the routes were gonnna use
 threadRoute :: Text
 threadRoute = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_NewTh :/ ()
@@ -91,21 +99,24 @@ postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_Get
 --routes we postJson to
 threadRequest :: Text -> XhrRequest Text
 threadRequest s = postJson threadRoute (PostRequest True (Just s) Nothing) --forcing image true until I actually figure it out
-commentRequest :: Text -> Id Post -> XhrRequest Text
-commentRequest s postId = postJson commentRoute (PostRequest False (Just s) (Just postId)) --forcing image false
+commentRequest :: Id Post -> Text -> XhrRequest Text
+commentRequest postId s = postJson commentRoute (PostRequest False (Just s) (Just postId)) --forcing image false
 fetchThreads :: PostFetch ->  XhrRequest Text 
 fetchThreads pf= postJson listRoute pf --pf 0 20
 --decode functions
-decodeThreadList :: PostFetch -> [PostResponse]
-decodeThreadList pf = decodeXhrResponse <$> performRequestAsync (fetchThreads pf)
+decodeThreadList :: PostFetch -> [Maybe PostResponse]
+decodeThreadList pf = decodeXhrResponse <$> performRequestAsync (fetchThreads <$> pf) --need to wrap pf in an event
 decodeThread :: Id Post -> [PostResponse]
 decodeThread postId = getAndDecode $ postRoute postId
 --render functions
 ----render an individual post
-renderPost :: AppWidget js t m => PostResponse -> m ()
+renderPost :: AppWidget js t m => Maybe PostResponse -> m ()
 renderPost p = do
-  text $ _postResponse_datetime p
-  text $ _postResponse_content p
+  case p of
+    Just po ->
+      text $ _postResponse_datetime p
+      text $ _postResponse_content p
+    _ -> text $ "uhhhhhh oops"
 ----loading screen
 viewPlaceholder :: AppWidget js t m => m ()
 viewPlaceholder = text "Loading post..."
@@ -114,7 +125,7 @@ viewPlaceholder = text "Loading post..."
 viewWholeThread :: AppWidget js t m => Id Post -> [PostResponse] -> m ()
 viewWholeThread postId l = Map renderPost l
 ----show main list of threads
-viewThreadList :: AppWidget js t m => [PostResponse] -> m ()
+viewThreadList :: AppWidget js t m => [Maybe PostResponse] -> m ()
 viewThreadList l = Map renderPost l
 
 app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R FrontendRoute) m ()
@@ -124,7 +135,7 @@ app =
       state <- postInput $ Thread
       prerender_
         viewPlaceholder -- loading screen
-        (viewThreadList (decodeThreadList PostFetch 0 20)) --list of posts
+        (viewThreadList (decodeThreadList updated $ constDyn (PostFetch 0 20))) --list of posts
         --todo allow users to change page or number of posts per page
       setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (stateToMaybeKey <$> updated state)
     FrontendRoute_ViewPost -> do
