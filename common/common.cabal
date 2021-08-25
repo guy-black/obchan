@@ -9,6 +9,7 @@ library
                , obelisk-route
                , mtl
                , text
+               , postgresql-simple
   default-extensions:
     TypeFamilies
     PolyKinds                 

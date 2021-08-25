@@ -16,13 +16,20 @@ library
                , database-id-class
                , database-id-obelisk
                , resource-pool
+               , aeson
+               , bytestring
+               , text
+               , postgresql-simple
+               , snap-core
+               , time
   exposed-modules:
     Backend
-  ghc-options: -Wall
+  ghc-options: -Wall -Wredundant-constraints -Wincomplete-uni-patterns -Wincomplete-record-updates -O -fno-show-valid-hole-fits
 
 executable backend
   main-is: main.hs
   hs-source-dirs: src-bin
+  ghc-options: -Wall -Wredundant-constraints -Wincomplete-uni-patterns -Wincomplete-record-updates -O -threaded -fno-show-valid-hole-fits
   if impl(ghcjs)
     buildable: False
   build-depends: base
@@ -30,3 +37,9 @@ executable backend
                , common
                , frontend
                , obelisk-backend
+               , aeson
+               , bytestring
+               , text
+               , postgresql-simple
+               , snap-core
+               , time

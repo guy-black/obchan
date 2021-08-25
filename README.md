@@ -7,11 +7,15 @@ This will be a simple *chan styled image board with heavily commented code when 
  - Database -first try
  - Backend -first try
  - barebones frontend -first try
-
+ - watched and rewatched several hours of lectures on frp
+ - achieved total enlightened
+ - got it to compile and half work
 ### Current project
- - get first try to compile
-### TODO
+ - lay out posts better
+ - lay out comments at all
  - Enable images
+### TODO
  - >greentext
  - link to comment with >>[id number]
- 
+ - basic styling
+ - clean and comment up the code

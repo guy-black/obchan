@@ -14,6 +14,7 @@ import Data.Text (Text)
 import GHC.Generics (Generic)
 import Common.Schema (Post(..))
 import Database.Id.Class (Id(..))
+import Data.Time as Time
 
 data PostRequest = PostRequest {
                  _postRequest_image :: Bool
@@ -37,5 +38,6 @@ data PostResponse = PostResponse {
                  ,_postResponse_image :: Bool
                  ,_postResponse_content :: (Maybe Text)
                  ,_postResponse_op :: (Maybe Int)
-                 ,_postResponse_datetime :: Text}
+                 ,_postResponse_datetime :: Time.LocalTime
+                 }
   deriving stock Generic deriving (ToJSON, FromJSON) -- todo: figure out what this line means

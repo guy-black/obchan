@@ -14,6 +14,8 @@
     # terms.security.acme.acceptTerms = false;
   }
 }:
+
+## copied this from obelisk examples
 let deps = obelisk.nixpkgs.thunkSet ./dep;
     haskellLib = obelisk.nixpkgs.haskell.lib;
 in with obelisk;
@@ -36,10 +38,10 @@ project ./. ({ ... }: {
 
 
 ###default setup###
-# with obelisk;
-# project ./. ({ ... }: {
-#   android.applicationId = "systems.obsidian.obelisk.examples.minimal";
-#   android.displayName = "Obelisk Minimal Example";
-#   ios.bundleIdentifier = "systems.obsidian.obelisk.examples.minimal";
-#   ios.bundleName = "Obelisk Minimal Example";
-# })
+#with obelisk;
+#project ./. ({ ... }: {
+#  android.applicationId = "systems.obsidian.obelisk.examples.minimal";
+#  android.displayName = "Obelisk Minimal Example";
+#  ios.bundleIdentifier = "systems.obsidian.obelisk.examples.minimal";
+#  ios.bundleName = "Obelisk Minimal Example";
+#})
