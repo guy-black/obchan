@@ -13,10 +13,12 @@ import GHC.Int
 import Database.Id.Class (Id(..))
 import qualified Data.Map as M
 import Data.Text (Text)
+import Data.Text as T
 import Reflex.Dom.Core
 import Control.Monad.Fix (MonadFix)
 import Language.Javascript.JSaddle (MonadJSM)
 import Data.Time as Time --for timestamp in postresponse
+import qualified Snap.Core as S
 
 import Obelisk.Frontend
 import Obelisk.Generated.Static
@@ -126,9 +128,11 @@ fromMaybe def m = case m of
 --render functions
 ----render an individual post
 renderPost :: AppWidget js t m => PostResponse -> m ()
-renderPost po = do
-  text $ "time goes here"
-  text $ (fromMaybe "whoops" (_postResponse_content po))
+renderPost po =
+  elAttr "div" ("class" =: "post" <> "id" =: ((T.pack . show) (_postResponse_id po))) $ do
+    display $ (constDyn (_postResponse_datetime po))
+    text $ ((T.pack . show) (_postResponse_id po))
+    text $ (fromMaybe "" (_postResponse_content po))
 
 ----loading screen
 viewPlaceholder :: AppWidget js t m => m ()
@@ -139,11 +143,10 @@ viewPlaceholder = text "Loading post..."
 --viewWholeThread :: AppWidget js t m => Id Post -> [PostResponse] -> m ()
 --viewWholeThread postId l = map renderPost l
 ----show main list of threads
-viewThreadList :: AppWidget js t m => Dynamic t [PostResponse] -> m ()
-viewThreadList dl = do--should end up with some dynamic widget listing post responses
+viewPostList :: AppWidget js t m => Dynamic t [PostResponse] -> m ()
+viewPostList dl = do--should end up with some dynamic widget listing post responses
   divClass "content" $ do
-    _ <- dyn (recRender <$> dl)
-    return ()
+    dyn_ (recRender <$> dl)
 
 recRender :: AppWidget js t m => [PostResponse] -> m ()
 recRender tl =
@@ -162,38 +165,56 @@ getThreadList = do
   holdDyn [] (fmapMaybe id (decodeXhrResponse <$> evThreadRes))
 -}
 
+renderThread :: WidgetWithJS js t m => Dynamic t (Id Post) -> m()
+renderThread postId = do
+  loaded <- getPostBuild
+  evMaLiPr <- getAndDecode $ postRoute <$> tag (current postId) loaded
+  divClass "content" $ do
+    widgetHold_ (text "loading thread") (recRender <$> (fmapMaybe id evMaLiPr))
+
+
+renderMain :: WidgetWithJS js t m => Event t () -> m ()
+renderMain mo = do
+  loaded <- getPostBuild
+  let evMoreThr = leftmost [loaded, mo] --Event t ()
+  let taggedEvThr = tag (constant (PostFetch 0 20)) evMoreThr --Event t (PostFetch), later use foldDyn to increment pf
+  evXhrRes <- performRequestAsync (fetchThreads <$> taggedEvThr)
+  let evLiPr = fmapMaybe id (decodeXhrResponse <$> evXhrRes)
+  dynLiPr <- foldDyn (++) [] evLiPr
+  viewPostList dynLiPr
+
 app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R FrontendRoute) m ()
 app =
   subRoute_ $ \case
     FrontendRoute_Main -> do
       evText <- inputBox
-      loaded <- getPostBuild
-      moreThreads <- button "testing more"
       evThRes <- prerender
         (return never)
         (performRequestAsync (threadRequest <$> evText))
-      let evReqPosts = fetchThreads <$> leftmost [(tag (constant (PostFetch 0 20)) loaded), (tag (constant (PostFetch 0 20)) moreThreads)]
-      evResPosts <- prerender
-        (return never)
-        (performRequestAsync evReqPosts)
-      threadList <- foldDyn (++) [] (fmapMaybe id (decodeXhrResponse <$> (switchDyn evResPosts)))
-      viewThreadList threadList
-     -- dynText $ (T.pack . show . )
+      let evMoreThr = never --later change this to fire whenever I want more threads to load
+      prerender_
+        (text "loading")
+        (renderMain evMoreThr)
       setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evThRes))
     FrontendRoute_ViewPost -> do
       postId <- askRoute
       evText <- inputBox
       evComRes <- prerender
-        (return never)
-        (performRequestAsync ((commentRequest `fmap` (current postId)) <@> evText))
-      --getPost : send postId to /GetPost and get a [PostResponse]
-      --renderThread : render getPost, if postId != ID first PostResponse, then scroll to PostResponse with postID
+        (pure never)
+        (performRequestAsync ((commentRequest <$> (current postId)) <@> evText))
+      --comments <- holdDyn [] (fmapMaybe id (switchDyn evComList))
       prerender_
         viewPlaceholder -- loading screen
-        (text "i'm working on it")
-      setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evComRes))
+        (renderThread postId)
+      --setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evComRes))
         --(viewWholeThread postId (decodeThread postId)) --post and comments
         --todo : idk but this just seems messy
+
+header :: AppWidget js t m => m()
+header =
+  elAttr "a" ("class" =: "header" <> "href" =: "/") $
+    text "OBchan"
+
 -- This runs in a monad that can be run on the client or the server.
 -- To run code in a pure client or pure server context, use one of the
 -- `prerender` functions.
@@ -202,5 +223,7 @@ frontend = Frontend
   { _frontend_head = do
       el "title" $ text "OBchan"
       elAttr "link" ("href" =: static @"main.css" <> "type" =: "text/css" <> "rel" =: "stylesheet") blank
-  , _frontend_body = app
+  , _frontend_body = do
+      header
+      app
   }

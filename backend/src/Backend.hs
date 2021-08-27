@@ -116,18 +116,22 @@ backend = Backend
               [[Nothing]] -> do --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
-                case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Ts.LocalTimestamp)]) of
-                  [(id,i,c,o,d)] -> case (d) of
-                    Ts.Finite a -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing a]
-                    _ -> do
-                      S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-                      S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
-                      S.writeText "timestamp machine broke"
-
-                    --S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
-                  _ -> do -- not found
+                    query dbcon "SELECT id,image,content,datetime FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
+                case (thread :: [(Int,Bool,Text,Ts.LocalTimestamp)]) of
+                  [] -> do
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
+                    S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
+                    S.writeText "oops no threads ¯\\_(ツ)_/¯"
+                  _ -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> thread))
+                --case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Ts.LocalTimestamp)]) of
+                --  [(id,i,c,o,d)] -> case (d) of
+                --    Ts.Finite a -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing a]
+                --    _ -> do
+                --      S.modifyResponse $ S.setResponseStatus 404 "Not Found"
+                --      S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
+                --      S.writeText "timestamp machine broke"
+                --  _ -> do -- not found
+                --    S.modifyResponse $ S.setResponseStatus 404 "Not Found"
               [[(Just threadId)]] -> do --this is a comment, return it's op
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
