@@ -8,11 +8,12 @@ module Backend where
 
 import qualified Common.Route as R
 import Common.Api
-import Common.Schema
+-- import Common.Schema
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as A
 import Data.ByteString.Lazy (toStrict)
 import Data.Text (Text)
+-- import Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word64)
 import Database.Id.Class (Id(..), unId)
@@ -20,17 +21,18 @@ import Data.Pool (withResource)
 import Database.PostgreSQL.Simple (execute_, Query, query)
 import Gargoyle.PostgreSQL.Connect (withDb)
 import Obelisk.Backend (Backend(..), _backend_run, _backend_routeEncoder)
-import Obelisk.Route (renderFrontendRoute, pattern (:/))
+import Obelisk.Route (renderFrontendRoute, renderBackendRoute, pattern (:/))
 import qualified Snap.Core as S
 import Database.PostgreSQL.Simple.Time as Ts -- LocalTimestamp
-import Data.Time as Time --LocalTime
+-- import Data.Time as Time --LocalTime
+import GHC.Int
 
 maxPostSize :: Word64
 maxPostSize = 10000 --in bytes
 
 migration :: Query
-migration = "CREATE TABLE IF NOT EXISTS posts\
-  \ (id SERIAL PRIMARY KEY, image BOOL NOT NULL, content TEXT, op INTEGER, datetime TIMESTAMP NOT NULL)"
+migration = "CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, image BOOL NOT NULL, \
+  \content TEXT NOT NULL, op INTEGER, datetime TIMESTAMP NOT NULL, lastAct TIMESTAMP, comCount INTEGER)"
 
 --tfw something goes wrong and you just want to go hom
 whoopsie :: S.Snap ()
@@ -40,10 +42,31 @@ whoopsie =
       renderFrontendRoute R.checkedFullRouteEncoder $
         R.FrontendRoute_Main :/ ()
 
-toPostResponse :: (Int,Bool,Text,Ts.LocalTimestamp) -> Maybe PostResponse
-toPostResponse (id, i, c, d) = case (d) of
-                    Ts.Finite a -> Just (PostResponse id i (Just c) Nothing a)
+toPostResponse :: (Int64,Bool,Text,Ts.LocalTimestamp) -> Maybe PostResponse
+toPostResponse (pid, i, c, d) = case (d) of
+                    Ts.Finite a -> Just (PostResponse pid i c a)
                     _ -> Nothing
+
+
+-- builds up [ThreadRespone] backwards, remember to reverse at the end
+toThreadResponse :: [ThreadResponse] -> [(Int64,Bool,Text,Ts.LocalTimestamp,(Maybe Int))] -> Maybe [ThreadResponse]
+toThreadResponse thr prs =
+  case prs of
+    [] -> Just (reverse thr) -- empty list of db results, base case, return reversed thr
+    (pid, i, c, d, cc):ps -> -- thread is real, start processing
+      case (toPostResponse (pid, i, c, d)) of
+            Nothing -> -- conversion to PostResponse Failed
+              Nothing
+            Just pr ->
+              case cc of
+                Just jcc -> -- this is an op, use to inittialize new ThreadResponse with comCount jcc
+                  toThreadResponse ((ThreadResponse pr [] jcc) : thr) ps
+                Nothing -> -- this is a comment, add to last ThreadResponse
+                  case thr of
+                    [] -> Nothing -- there should've been a ThreadResponse here
+                    (ThreadResponse op rep com):ts -> --the list isn't empty, update first element and recurse
+                       toThreadResponse ((ThreadResponse op (pr:rep) com):ts) ps
+
 
 maybeList2List :: [Maybe a] -> [a]
 maybeList2List l = case l of
@@ -64,10 +87,10 @@ backend = Backend
           R.BackendRoute_NewTh :/ () -> do
             thread <- A.decode <$> S.readRequestBody maxPostSize
             case (thread :: Maybe PostRequest) of
-              (Just (PostRequest True (Just t) Nothing)) -> do -- checks if it has text and picture and no OP
+              (Just (PostRequest True t Nothing)) -> do -- checks if it has text and picture and no OP
                 [[key]] <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "INSERT INTO posts (image,content,op,datetime) VALUES (TRUE,?,NULL,now()) RETURNING id" [t :: Text]
+                    query dbcon "INSERT INTO posts (image,content,op,datetime,lastAct,comCount) VALUES (TRUE,?,NULL,now(),now(),0) RETURNING id" [t :: Text]
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
                 S.writeBS $ toStrict $ A.encode (key :: Int)
               _ -> whoopsie           
@@ -76,11 +99,12 @@ backend = Backend
             case (comment :: Maybe PostRequest) of
               Nothing -> whoopsie --incase decode failed -- reject
               (Just (PostRequest _ _ Nothing)) -> whoopsie --in case the comment has no OP value -- reject
-              (Just (PostRequest False Nothing _)) -> whoopsie --in case image is false AND content is blank -- reject
+              (Just (PostRequest False "" _)) -> whoopsie --in case image is false AND content is blank -- reject
               (Just (PostRequest i c (Just o))) -> do --not Nothing, has an Op, image is true and/or content is there -- accept
                 [[thKey]] <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "INSERT INTO posts (image,content,op,datetime) VALUES (?,?,?,now()) RETURNING id" (i :: Bool,c :: Maybe Text, unId o )
+                    query dbcon "UPDATE posts SET comCount = comCount + 1, lastAct = now() WHERE id = ?; \
+                      \INSERT INTO posts (image,content,op,datetime) VALUES (?,?,?,now()) RETURNING op" (unId o,i :: Bool,c :: Text,unId o)
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
                 S.writeBS $ toStrict $ A.encode (thKey :: Int)
           R.BackendRoute_ListPosts :/ () -> do
@@ -89,21 +113,19 @@ backend = Backend
               (Just (PostFetch p n)) -> do
                 postList <- liftIO $
                   withResource pool $ \dbcon ->
-                    -- select from posts Where OP is Null; sort by most recent, skip the first p, return the next n
-                    query dbcon "SELECT id,image,content,datetime FROM posts WHERE op is NULL\
-                      \ ORDER BY id DESC OFFSET ? LIMIT ?" (p :: Int,n :: Int)
-                case (postList :: [(Int,Bool,Text,Ts.LocalTimestamp)]) of
+                    query dbcon "SELECT id,image,content,datetime,comCount FROM getThreadPreviews(?,?)" (p :: Int,n :: Int)
+                case (postList :: [(Int64,Bool,Text,Ts.LocalTimestamp,(Maybe Int))]) of
                   [] -> do
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
                     S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
                     S.writeText "oops no threads ¯\\_(ツ)_/¯"
-                  _ -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> postList))
-                 -- (id,i,c,d):[] -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> postList))
-                 -- (id,i,c,d):[xs] -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> postList))
-                 -- _ -> do
-                 --   S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-                 --   S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
-                 --   S.writeText "postgres didnt get the threads ¯\\_(ツ)_/¯"
+                  _ ->
+                    case (toThreadResponse [] postList) of
+                      Nothing -> do
+                        S.modifyResponse $ S.setResponseStatus 404 "Not Found"
+                        S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
+                        S.writeText "ThreadResponse machine broke ¯\\_(ツ)_/¯"
+                      Just thrLi -> S.writeBS $ toStrict $ A.encode $ thrLi
               _ -> do
                 S.modifyResponse $ S.setResponseStatus 404 "Not Found"
                 S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
@@ -112,40 +134,30 @@ backend = Backend
             op <- liftIO $
               withResource pool $ \dbcon ->
                 query dbcon "SELECT op FROM posts WHERE id = ?" [unId key]
-            case (op :: [[Maybe Int]]) of
+            case (op :: [[Maybe Int64]]) of
               [[Nothing]] -> do --this is the OP, return a list with this post first and all posts who's OP == key OR the post isnt real
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
                     query dbcon "SELECT id,image,content,datetime FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (unId key,unId key)
-                case (thread :: [(Int,Bool,Text,Ts.LocalTimestamp)]) of
+                case (thread :: [(Int64,Bool,Text,Ts.LocalTimestamp)]) of
                   [] -> do
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
                     S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
-                    S.writeText "oops no threads ¯\\_(ツ)_/¯"
+                    S.writeText "oops no commentss ¯\\_(ツ)_/¯"
                   _ -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> thread))
-                --case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Ts.LocalTimestamp)]) of
-                --  [(id,i,c,o,d)] -> case (d) of
-                --    Ts.Finite a -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing a]
-                --    _ -> do
-                --      S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-                --      S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
-                --      S.writeText "timestamp machine broke"
-                --  _ -> do -- not found
-                --    S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-              [[(Just threadId)]] -> do --this is a comment, return it's op
+              [[(Just threadId)]] -> do --this is a comment, redirect to it's op
                 thread <- liftIO $
                   withResource pool $ \dbcon ->
-                    query dbcon "SELECT * FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (threadId,threadId)
-                case (thread :: [(Int,Bool,(Maybe Text),(Maybe Int),Ts.LocalTimestamp)]) of
-                  [(id,i,c,o,d)] -> case (d) of
-                    Ts.Finite a -> S.writeBS $ toStrict $ A.encode $ [PostResponse id i c Nothing a]
-                    _ -> do
-                      S.modifyResponse $ S.setResponseStatus 404 "Not Found"
-                      S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
-                      S.writeText "timestamp machine broke"
-                    --S.writeBS $ toStrict $ A.encode $ PostResponse id i c o d
-                  _ -> -- not found
+                    query dbcon "SELECT id,image,content,datetime FROM posts WHERE id = ? OR op = ? ORDER BY id ASC" (threadId, threadId)
+                case (thread :: [(Int64,Bool,Text,Ts.LocalTimestamp)]) of
+                  [] -> do
                     S.modifyResponse $ S.setResponseStatus 404 "Not Found"
+                    S.modifyResponse $ S.setContentType "text/plain; charset=utf8"
+                    S.writeText "oops no commentss ¯\\_(ツ)_/¯"
+                  _ -> S.writeBS $ toStrict $ A.encode $ (maybeList2List (toPostResponse <$> thread))
+              _ -> whoopsie -- shoudn't happen, just here to to remove compiler warning
+
+
           _ -> whoopsie
       return () -- -> IO ()
   , _backend_routeEncoder = R.fullRouteEncoder

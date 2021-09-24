@@ -21,18 +21,18 @@ import Database.Id.Class (Id)
 import Database.Id.Obelisk.Route (idPathSegmentEncoder)
 import Obelisk.Route
 import Obelisk.Route.TH
-import Common.Schema
+import Common.Api
 
 data BackendRoute :: * -> * where
   BackendRoute_Missing :: BackendRoute () -- Used to handle unparseable routes.
   BackendRoute_NewTh :: BackendRoute () -- to make a new thread
   BackendRoute_NewCom :: BackendRoute () -- to make a new comment
   BackendRoute_ListPosts :: BackendRoute () -- to get recent posts
-  BackendRoute_GetPost :: BackendRoute (Id Post) -- to get a single thread
+  BackendRoute_GetPost :: BackendRoute (Id PostResponse) -- to get a single thread
 
 data FrontendRoute :: * -> * where
   FrontendRoute_Main :: FrontendRoute () -- home page
-  FrontendRoute_ViewPost :: FrontendRoute (Id Post) -- thread page
+  FrontendRoute_ViewPost :: FrontendRoute (Id PostResponse) -- thread page
 
 checkedFullRouteEncoder
   :: Encoder Identity Identity (R (FullRoute BackendRoute FrontendRoute)) PageName

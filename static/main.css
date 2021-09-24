@@ -1,3 +1,46 @@
-p {
-  color: red;  
+body {
+  background-color: #eeeeee;
+  display: grid;
+  justify-items: center
+}
+
+.op {
+  background-color: #cccccc;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  margin: 16px;
+  padding: 16px;
+  text-align: right;
+}
+
+.comment {
+  background-color: #dddddd;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  margin: 16px;
+  padding: 16px;
+  text-align: right;
+}
+
+.link {
+  text-decoration: none;
+  color: #000000
+}
+
+.postId {
+  margin: 0;
+}
+
+.timestamp {
+  margin: 0;
+}
+
+.postContent {
+  margin: 0;
+}
+
+.header {
+  text-decoration: none;
+  color: black;
+  font-size: 28px;
 }
