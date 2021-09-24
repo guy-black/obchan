@@ -17,7 +17,11 @@ This will be a simple *chan styled image board with heavily commented code when 
  - threads are ordered by last activity, bump works
  - paging
 ### Current project
+ - find out why linebreaks wont render
  - >greentext
+   - check _postResponse_content for any ">"
+     - split Text into [Text] separating from > to linebreak
+     - the > Text will be rendered with a different class_
  - images
 ### TODO
  - scroll to bottom after comment
