@@ -11,9 +11,11 @@ import Common.Api
 -- import Common.Schema
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Aeson as A
+import qualified Data.Map as M
+import qualified JSDOM.Types as JST
+import Data.Map (Map, (!?))
 import Data.ByteString.Lazy (toStrict)
 import Data.Text (Text)
--- import Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Word (Word64)
 import Database.Id.Class (Id(..), unId)
@@ -26,6 +28,7 @@ import qualified Snap.Core as S
 import Database.PostgreSQL.Simple.Time as Ts -- LocalTimestamp
 -- import Data.Time as Time --LocalTime
 import GHC.Int
+import Reflex.Dom.Xhr.FormData (FormValue)
 
 maxPostSize :: Word64
 maxPostSize = 10000 --in bytes
@@ -85,28 +88,30 @@ backend = Backend
         _ <- withResource pool $ \dbcon -> execute_ dbcon migration
         serve $ \case -- \case::(R backendRoute -> Snap ())
           R.BackendRoute_NewTh :/ () -> do
-            thread <- A.decode <$> S.readRequestBody maxPostSize
-            case (thread :: Maybe PostRequest) of
-              (Just (PostRequest True t Nothing)) -> do -- checks if it has text and picture and no OP
-                [[key]] <- liftIO $
-                  withResource pool $ \dbcon ->
-                    query dbcon "INSERT INTO posts (image,content,op,datetime,lastAct,comCount) VALUES (TRUE,?,NULL,now(),now(),0) RETURNING id" [t :: Text]
+            -- thread <- A.decode <$> S.readRequestBody maxPostSize
+            -- case (thread :: Maybe (Map Text (FormValue JST.File))) of
+              -- (Just m) -> do
+                -- todo: destructure map and remake the query
+                -- [[key]] <- liftIO $
+                --   withResource pool $ \dbcon ->
+                --     query dbcon "INSERT INTO posts (image,content,op,datetime,lastAct,comCount) VALUES (TRUE,?,NULL,now(),now(),0) RETURNING id" [t :: Text]
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
-                S.writeBS $ toStrict $ A.encode (key :: Int)
-              _ -> whoopsie           
+                -- S.writeBS $ toStrict $ A.encode (key :: Int)
+              -- _ -> whoopsie
           R.BackendRoute_NewCom :/ () -> do
-            comment <- A.decode <$> S.readRequestBody maxPostSize
-            case (comment :: Maybe PostRequest) of
-              Nothing -> whoopsie --incase decode failed -- reject
-              (Just (PostRequest _ _ Nothing)) -> whoopsie --in case the comment has no OP value -- reject
-              (Just (PostRequest False "" _)) -> whoopsie --in case image is false AND content is blank -- reject
-              (Just (PostRequest i c (Just o))) -> do --not Nothing, has an Op, image is true and/or content is there -- accept
-                [[thKey]] <- liftIO $
-                  withResource pool $ \dbcon ->
-                    query dbcon "UPDATE posts SET comCount = comCount + 1, lastAct = now() WHERE id = ?; \
-                      \INSERT INTO posts (image,content,op,datetime) VALUES (?,?,?,now()) RETURNING op" (unId o,i :: Bool,c :: Text,unId o)
+            -- comment <- A.decode <$> S.readRequestBody maxPostSize
+            -- case (comment :: Maybe (Map Text (FormValue JST.File))) of
+              -- Nothing -> whoopsie --incase decode failed -- reject
+              -- (Just (PostRequest _ _ Nothing)) -> whoopsie --in case the comment has no OP value -- reject
+              -- (Just (PostRequest False "" _)) -> whoopsie --in case image is false AND content is blank -- reject
+              -- (Just m) -> do
+                -- destructure and ensure it has an OP and a pic and/or text
+                -- [[thKey]] <- liftIO $
+                --   withResource pool $ \dbcon ->
+                --     query dbcon "UPDATE posts SET comCount = comCount + 1, lastAct = now() WHERE id = ?; \
+                --       \INSERT INTO posts (image,content,op,datetime) VALUES (?,?,?,now()) RETURNING op" (unId o,i :: Bool,c :: Text,unId o)
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
-                S.writeBS $ toStrict $ A.encode (thKey :: Int)
+                -- S.writeBS $ toStrict $ A.encode (thKey :: Int)
           R.BackendRoute_ListPosts :/ () -> do
             postOrder <- A.decode <$> S.readRequestBody maxPostSize --todo: it probably doesnt need a max 10000 bytes but I want to lessen the initial list of things I did wrong, will fix later
             case (postOrder :: (Maybe PostFetch)) of -- (placeinthreadlist,numberofpoststoshow)

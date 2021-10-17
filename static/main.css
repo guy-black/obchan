@@ -10,7 +10,7 @@ body {
   grid-template-rows: auto 1fr auto;
   margin: 16px;
   padding: 16px;
-  text-align: right;
+  /*text-align: right;*/
 }
 
 .comment {
@@ -19,7 +19,7 @@ body {
   grid-template-rows: auto 1fr auto;
   margin: 16px;
   padding: 16px;
-  text-align: right;
+/*  text-align: right; */
 }
 
 .link {
@@ -43,4 +43,8 @@ body {
   text-decoration: none;
   color: black;
   font-size: 28px;
+}
+
+.greentext {
+  color : green;
 }

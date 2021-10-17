@@ -24,6 +24,8 @@ import qualified Snap.Core as S
 import qualified GHCJS.DOM as DOM
 import qualified GHCJS.DOM.Window as Window
 import qualified GHCJS.DOM.Location as Location
+import qualified JSDOM.Types as JST
+
 
 import Obelisk.Frontend
 import Obelisk.Generated.Static
@@ -51,12 +53,20 @@ type WidgetWithJS js t m =
   , MonadJSM m
   )
 
-inputBox :: AppWidget js t m => Event t () -> m (Event t Text)
+maybeHead :: [a] -> Maybe a
+maybeHead x = case x of
+    [] -> Nothing
+    (a : as) -> Just a
+
+inputBox :: AppWidget js t m => Event t () -> m (Event t ((Maybe JST.File), Text))
 inputBox clr = do
   divClass "input" $ do
     inputEl <- textAreaElement def { _textAreaElementConfig_setValue = Just ("" <$ clr)}
     click <- button "submit"
-    return (tag (current $ _textAreaElement_value inputEl) click)
+    inRes <- inputElement $ def & initialAttributes .~ ("type" =: "file")
+    let dynFileList = _inputElement_files inRes -- Dynamic t [File]
+    let behFil = maybeHead <$> (current dynFileList) -- Behavior t (Maybe File)
+    return (attach behFil (tag (current $ _textAreaElement_value inputEl) click))
 
 --shortcuts for the routes were gonnna use
 threadRoute :: Text
@@ -69,10 +79,28 @@ postRoute :: Id PostResponse -> Text
 postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_GetPost :/ postId
 
 --routes we postJson to
-threadRequest :: Text -> XhrRequest Text
-threadRequest s = postJson threadRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
-commentRequest :: Id PostResponse -> Text -> XhrRequest Text
-commentRequest postId s = postJson commentRoute (PostRequest False s (Just postId)) --forcing image false
+
+mapPost :: Maybe (Id PostResponse) -> (Maybe JST.File, Text) -> [M.Map Text (FormValue JST.File)]
+mapPost mOp (mf, c) =
+  case (mf, mOp) of
+    (Nothing, Nothing) ->
+      [] -- no pic, no op to comment on, no post
+    (Nothing, Just op) -> -- comment without pic
+      ("content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op))):[]
+    (Just f, Nothing) -> do-- new thread
+      ff <- fileToFormValue f
+      ("image" =: ff <> "content" =: (FormValue_Text c)):[]
+    (Just f, Just op) -> do-- comment with pic
+      ff <- fileToFormValue f
+      ("image" =: ff <> "content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op))):[]
+
+-- why did putting MonadJSM [] in constraints
+postThread :: WidgetWithJS js t m => Event t (Maybe JST.File, Text) -> m (Event t [XhrResponse])
+postThread mfc = do
+  postForms threadRoute (mapPost Nothing <$> mfc)
+postComment :: WidgetWithJS js t m => Id PostResponse -> Event t (Maybe JST.File, Text) -> m (Event t [XhrResponse])
+postComment postId mfc = do
+  postForms commentRoute ((mapPost (Just postId)) <$> mfc)
 fetchThreads :: PostFetch ->  XhrRequest Text 
 fetchThreads pf= postJson listRoute pf
 
@@ -81,6 +109,9 @@ fromMaybe def m = case m of
   Nothing -> def
   Just j -> j
 
+maybe2list :: Maybe a -> [a]
+maybe2list Nothing = []
+maybe2list Just a = a:[]
 
 ----loading screen
 viewPlaceholder :: AppWidget js t m => m ()
@@ -112,8 +143,23 @@ renderComment :: AppWidget js t m => PostResponse -> m ()
 renderComment po =
   elAttr "div" ("class" =: "comment" <> "id" =: ((T.pack . show) (_postResponse_id po))) $ do
     elAttr "p" ("class" =: "timestamp") $ display $ (constDyn (_postResponse_datetime po))
-    elAttr "p" ("class" =: "postContent") $ text $ _postResponse_content po
+    elAttr "p" ("class" =: "postContent") $ (textBlob . T.lines) $ _postResponse_content po
     elAttr "p" ("class" =: "postId") $ display $ (constDyn (_postResponse_id po))
+
+textBlob :: AppWidget js t m => [Text] -> m()
+textBlob bl =
+  case bl of
+    [] -> blank -- shouldn't happen
+    (a:[]) -> text a
+    (a:as) -> do
+      if T.null a then do
+        text ""
+      --else if (T.isPrefixOf ">" (T.strip a)) then
+      --  elAttr "span" ("class" =: "greentext") $ text a
+      else do
+        text a
+      el "br" blank
+      textBlob as
 
 recRender :: AppWidget js t m => (a -> m ()) -> [a] -> m ()
 recRender rf tl =
@@ -172,31 +218,33 @@ app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R Fronte
 app =
   subRoute_ $ \case
     FrontendRoute_Main -> do
-      evText <- inputBox never
+      evPost <- inputBox never -- now Event t (Maybe File, Text)
       evThRes <- prerender
         (return never)
-        (performRequestAsync (threadRequest <$> evText))
+        (postThread evPost)
       rec
         prerender_
           (text "loading")
           (renderMain evMoreThr)
         evMoreThr <- button "see more"
-      setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evThRes))
+      return ()
+      -- setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evThRes))
     FrontendRoute_ViewPost -> do
       postId <- askRoute
+      pid <- (sample . current) postId
       rec
-        evText <- inputBox evComPosted
+        evPost <- inputBox never -- evComPosted
         dynEvComRes <- prerender
           (pure never)
-          (performRequestAsync ((commentRequest <$> (current postId)) <@> evText))
-        let evComPosted = void (switchDyn dynEvComRes)
-      redirect <- prerender -- redirect :: Dynamic t (Event t (Maybe (Id PostRresponse)))
-        viewPlaceholder' -- loading screen
-        (renderThread postId evComPosted)
-      pid <- (sample . current) postId
+          ((postComment pid) evPost)
+      --  let evComPosted = void (switchDyn dynEvComRes)
+      --redirect <- prerender -- redirect :: Dynamic t (Event t (Maybe (Id PostRresponse)))
+      --  viewPlaceholder' -- loading screen
+      --  (renderThread postId evComPosted)
       --setRoute $ (FrontendRoute_Main :/) <$> evComPosted -- if comment posted redirect to home
-      let evRecPostId = fmapMaybe id (switchDyn redirect) -- Event t (Id PostResponse), the Id of Op of thread
-      setRoute $ (FrontendRoute_ViewPost :/) <$> (ffilter (pid /=) evRecPostId) -- redirect to right thread
+      --let evRecPostId = fmapMaybe id (switchDyn redirect) -- Event t (Id PostResponse), the Id of Op of thread
+      --setRoute $ (FrontendRoute_ViewPost :/) <$> (ffilter (pid /=) evRecPostId) -- redirect to right thread
+      return ()
 
 header :: AppWidget js t m => m()
 header =
