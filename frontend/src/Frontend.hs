@@ -80,27 +80,24 @@ postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_Get
 
 --routes we postJson to
 
-mapPost :: Maybe (Id PostResponse) -> (Maybe JST.File, Text) -> [M.Map Text (FormValue JST.File)]
+mapPost :: Maybe (Id PostResponse) -> (Maybe JST.File, Text) -> Maybe (M.Map Text (FormValue JST.File))
 mapPost mOp (mf, c) =
   case (mf, mOp) of
     (Nothing, Nothing) ->
-      [] -- no pic, no op to comment on, no post
+      Nothing -- no pic, no op to comment on, no post
     (Nothing, Just op) -> -- comment without pic
-      ("content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op))):[]
+      Just ("content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op)))
     (Just f, Nothing) -> do-- new thread
       ff <- fileToFormValue f
-      ("image" =: ff <> "content" =: (FormValue_Text c)):[]
+      Just ("image" =: ff <> "content" =: (FormValue_Text c))
     (Just f, Just op) -> do-- comment with pic
       ff <- fileToFormValue f
-      ("image" =: ff <> "content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op))):[]
+      Just ("image" =: ff <> "content" =: (FormValue_Text c) <> "op" =: (FormValue_Text ((T.pack . show) op)))
 
--- why did putting MonadJSM [] in constraints
-postThread :: WidgetWithJS js t m => Event t (Maybe JST.File, Text) -> m (Event t [XhrResponse])
-postThread mfc = do
-  postForms threadRoute (mapPost Nothing <$> mfc)
-postComment :: WidgetWithJS js t m => Id PostResponse -> Event t (Maybe JST.File, Text) -> m (Event t [XhrResponse])
-postComment postId mfc = do
-  postForms commentRoute ((mapPost (Just postId)) <$> mfc)
+postThread :: WidgetWithJS js t m => Event t (Maybe JST.File, Text) -> m (Event t (Maybe XhrResponse))
+postThread mfc = postForms threadRoute ((mapPost Nothing) <$> mfc)
+postComment :: WidgetWithJS js t m => Id PostResponse -> Event t (Maybe JST.File, Text) -> m (Event t (Maybe XhrResponse))
+postComment postId mfc = postForms commentRoute ((mapPost (Just postId)) <$> mfc)
 fetchThreads :: PostFetch ->  XhrRequest Text 
 fetchThreads pf= postJson listRoute pf
 
@@ -109,9 +106,6 @@ fromMaybe def m = case m of
   Nothing -> def
   Just j -> j
 
-maybe2list :: Maybe a -> [a]
-maybe2list Nothing = []
-maybe2list Just a = a:[]
 
 ----loading screen
 viewPlaceholder :: AppWidget js t m => m ()
@@ -227,24 +221,22 @@ app =
           (text "loading")
           (renderMain evMoreThr)
         evMoreThr <- button "see more"
-      return ()
-      -- setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (switchDyn evThRes))
+      setRoute $ (FrontendRoute_ViewPost :/) . Id <$> fmapMaybe id (decodeXhrResponse <$> (fmapMaybe id (switchDyn evThRes)))
     FrontendRoute_ViewPost -> do
       postId <- askRoute
       pid <- (sample . current) postId
       rec
-        evPost <- inputBox never -- evComPosted
+        evPost <- inputBox evComPosted
         dynEvComRes <- prerender
           (pure never)
           ((postComment pid) evPost)
-      --  let evComPosted = void (switchDyn dynEvComRes)
-      --redirect <- prerender -- redirect :: Dynamic t (Event t (Maybe (Id PostRresponse)))
-      --  viewPlaceholder' -- loading screen
-      --  (renderThread postId evComPosted)
+        let evComPosted = void (switchDyn dynEvComRes)
+      redirect <- prerender -- redirect :: Dynamic t (Event t (Maybe (Id PostRresponse)))
+        viewPlaceholder' -- loading screen
+        (renderThread postId evComPosted)
       --setRoute $ (FrontendRoute_Main :/) <$> evComPosted -- if comment posted redirect to home
-      --let evRecPostId = fmapMaybe id (switchDyn redirect) -- Event t (Id PostResponse), the Id of Op of thread
-      --setRoute $ (FrontendRoute_ViewPost :/) <$> (ffilter (pid /=) evRecPostId) -- redirect to right thread
-      return ()
+      let evRecPostId = fmapMaybe id (switchDyn redirect) -- Event t (Id PostResponse), the Id of Op of thread
+      setRoute $ (FrontendRoute_ViewPost :/) <$> (ffilter (pid /=) evRecPostId) -- redirect to right thread
 
 header :: AppWidget js t m => m()
 header =
