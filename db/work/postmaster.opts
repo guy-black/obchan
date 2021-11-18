@@ -1,1 +1,0 @@
-/nix/store/kvidbg676161jx84av4xfy4f6zdjh4rc-postgresql-9.6.15/bin/postgres "-D" "/home/guy/obchan/db/work" "-h" "" "-k" "/home/guy/obchan/db/work"
