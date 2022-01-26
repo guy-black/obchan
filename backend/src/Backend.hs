@@ -32,7 +32,23 @@ maxPostSize = 10000 --in bytes
 
 migration :: Query
 migration = "CREATE TABLE IF NOT EXISTS posts (id SERIAL PRIMARY KEY, image BOOL NOT NULL, \
-  \content TEXT NOT NULL, op INTEGER, datetime TIMESTAMP NOT NULL, lastAct TIMESTAMP, comCount INTEGER)"
+  \content TEXT NOT NULL, op INTEGER, datetime TIMESTAMP NOT NULL, lastAct TIMESTAMP, comCount INTEGER);\
+  \CREATE OR REPLACE FUNCTION getThreadPreviews(page INTEGER, count INTEGER) RETURNS SETOF posts\n\
+   \AS\n\
+   \$$\n\
+   \DECLARE\n\
+     \op posts%rowtype;\n\
+   \BEGIN\n\
+     \FOR op IN\n\
+     \SELECT * FROM posts WHERE posts.op is NULL ORDER BY posts.lastact desc OFFSET page LIMIT count\n\
+     \LOOP\n\
+       \RETURN NEXT op;\n\
+       \RETURN QUERY SELECT * FROM posts WHERE posts.op = op.id ORDER BY posts.datetime desc LIMIT 3;\n\
+     \END LOOP;\n\
+     \RETURN;\n\
+   \END;\n\
+   \$$\n\
+   \LANGUAGE plpgsql"
 
 --tfw something goes wrong and you just want to go hom
 whoopsie :: S.Snap ()
@@ -93,7 +109,7 @@ backend = Backend
                     query dbcon "INSERT INTO posts (image,content,op,datetime,lastAct,comCount) VALUES (TRUE,?,NULL,now(),now(),0) RETURNING id" [t :: Text]
                 S.modifyResponse $ S.setResponseStatus 200 "OK"
                 S.writeBS $ toStrict $ A.encode (key :: Int)
-              _ -> whoopsie           
+              _ -> whoopsie
           R.BackendRoute_NewCom :/ () -> do
             comment <- A.decode <$> S.readRequestBody maxPostSize
             case (comment :: Maybe PostRequest) of
