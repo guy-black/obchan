@@ -16,10 +16,15 @@ import Database.Id.Class (Id(..))
 import qualified Data.Map as M
 import Data.Text (Text)
 import Data.Text as T
+import Data.Maybe (listToMaybe)
+import Data.List
 import Reflex.Dom.Core
 import Control.Monad.Fix (MonadFix)
-import Language.Javascript.JSaddle (MonadJSM, eval, liftJSM)
+import Language.Javascript.JSaddle (MonadJSM, eval, liftJSM, fromJSVal, toJSVal)
 import Data.Time as Time --for timestamp in postresponse
+import GHCJS.DOM.Types (File)
+import GHCJS.DOM.EventM (on)
+import GHCJS.DOM.FileReader (newFileReader, readAsDataURL, load, getResult)
 import qualified Snap.Core as S
 import qualified GHCJS.DOM as DOM
 import qualified GHCJS.DOM.Window as Window
@@ -51,12 +56,44 @@ type WidgetWithJS js t m =
   , MonadJSM m
   )
 
-inputBox :: AppWidget js t m => Event t () -> m (Event t Text)
+fileInputElement :: DomBuilder t m => m (Dynamic t [File])
+fileInputElement = do
+  ie <- inputElement $ def
+    & inputElementConfig_elementConfig . elementConfig_initialAttributes .~
+      ("id" =: "imgUpload" <> "type" =: "file" <> "accept" =: "image/png, image/jpeg")
+  return (_inputElement_files ie)
+
+dataURLFileReader
+  :: ( DomBuilder t m
+     , TriggerEvent t m
+     , PerformEvent t m
+     , Prerender js t m
+     )
+  => Event t File -> m (Event t Text)
+dataURLFileReader request = do
+  readD <- prerender (return never) $ do
+    fileReader <- liftJSM newFileReader
+    performEvent_ (fmap (readAsDataURL fileReader . Just) request)
+    e <- wrapDomEvent fileReader (`on` load) . liftJSM $ do
+      v <- getResult fileReader
+      (fromJSVal <=< toJSVal) v
+    return (fmapMaybe id e)
+  return (coincidence (updated readD))
+
+inputBox :: AppWidget js t m => Event t () -> m (Event t (Text,Text))
 inputBox clr = do
   divClass "input" $ do
     inputEl <- textAreaElement def { _textAreaElementConfig_setValue = Just ("" <$ clr)}
+    filesDyn <- fileInputElement
+    urlE <- -- fmap (ffilter ("data:image" `T.isPrefixOf`)) .
+         dataURLFileReader
+        . fmapMaybe listToMaybe
+        . updated $ filesDyn
+    urlD <- holdDyn "initial" urlE
+    dynText urlD
+    display (Data.List.length <$> filesDyn)
     click <- button "submit"
-    return (tag (current $ _textAreaElement_value inputEl) click)
+    return (attach (current $ urlD) (tag (current $ _textAreaElement_value inputEl) click))
 
 --shortcuts for the routes were gonnna use
 threadRoute :: Text
@@ -69,11 +106,11 @@ postRoute :: Id PostResponse -> Text
 postRoute postId = renderBackendRoute checkedFullRouteEncoder $ BackendRoute_GetPost :/ postId
 
 --routes we postJson to
-threadRequest :: Text -> XhrRequest Text
-threadRequest s = postJson threadRoute (PostRequest True s Nothing) --forcing image true until I actually figure it out
-commentRequest :: Id PostResponse -> Text -> XhrRequest Text
-commentRequest postId s = postJson commentRoute (PostRequest False s (Just postId)) --forcing image false
-fetchThreads :: PostFetch ->  XhrRequest Text 
+threadRequest :: (Text,Text) -> XhrRequest Text
+threadRequest (img, con) = postJson threadRoute (PostRequest img con Nothing) --forcing image true until I actually figure it out
+commentRequest :: Id PostResponse -> (Text,Text) -> XhrRequest Text
+commentRequest postId (img, con) = postJson commentRoute (PostRequest img con (Just postId)) --forcing image false
+fetchThreads :: PostFetch ->  XhrRequest Text
 fetchThreads pf= postJson listRoute pf
 
 fromMaybe :: a -> Maybe a -> a
@@ -110,10 +147,18 @@ renderOp (ThreadResponse op rep cc) =
 
 renderComment :: AppWidget js t m => PostResponse -> m ()
 renderComment po =
-  elAttr "div" ("class" =: "comment" <> "id" =: ((T.pack . show) (_postResponse_id po))) $ do
-    elAttr "p" ("class" =: "timestamp") $ display $ (constDyn (_postResponse_datetime po))
-    elAttr "p" ("class" =: "postContent") $ text $ _postResponse_content po
-    elAttr "p" ("class" =: "postId") $ display $ (constDyn (_postResponse_id po))
+  case (_postResponse_image po) of
+    "" ->
+      elAttr "div" ("class" =: "comment" <> "id" =: ((T.pack . show) (_postResponse_id po))) $ do
+        elAttr "p" ("class" =: "timestamp") $ display $ (constDyn (_postResponse_datetime po))
+        elAttr "p" ("class" =: "postContent") $ text $ _postResponse_content po
+        elAttr "p" ("class" =: "postId") $ display $ (constDyn (_postResponse_id po))
+    im ->
+      elAttr "div" ("class" =: "comment" <> "id" =: ((T.pack . show) (_postResponse_id po))) $ do
+        elAttr "img" ("src" =: im <> "style" =: "max-width: 40%") blank
+        elAttr "p" ("class" =: "timestamp") $ display $ (constDyn (_postResponse_datetime po))
+        elAttr "p" ("class" =: "postContent") $ text $ _postResponse_content po
+        elAttr "p" ("class" =: "postId") $ display $ (constDyn (_postResponse_id po))
 
 recRender :: AppWidget js t m => (a -> m ()) -> [a] -> m ()
 recRender rf tl =
@@ -172,10 +217,10 @@ app :: (AppWidget js t m, SetRoute t (R FrontendRoute) m) => RoutedT t (R Fronte
 app =
   subRoute_ $ \case
     FrontendRoute_Main -> do
-      evText <- inputBox never
+      evImgCon <- inputBox never
       evThRes <- prerender
         (return never)
-        (performRequestAsync (threadRequest <$> evText))
+        (performRequestAsync (threadRequest <$> evImgCon))
       rec
         prerender_
           (text "loading")
@@ -185,10 +230,10 @@ app =
     FrontendRoute_ViewPost -> do
       postId <- askRoute
       rec
-        evText <- inputBox evComPosted
+        evImgCon <- inputBox evComPosted
         dynEvComRes <- prerender
           (pure never)
-          (performRequestAsync ((commentRequest <$> (current postId)) <@> evText))
+          (performRequestAsync ((commentRequest <$> (current postId)) <@> evImgCon))
         let evComPosted = void (switchDyn dynEvComRes)
       redirect <- prerender -- redirect :: Dynamic t (Event t (Maybe (Id PostRresponse)))
         viewPlaceholder' -- loading screen

@@ -18,7 +18,7 @@ import Database.Id.Class (Id(..), HasId)
 import Data.Time as Time
 
 data PostRequest = PostRequest {
-                 _postRequest_image :: Bool
+                 _postRequest_image :: Text
                 ,_postRequest_content :: Text
                 ,_postRequest_op :: Maybe (Id PostResponse)
                 }
@@ -29,11 +29,11 @@ data PostFetch = PostFetch {
                   _page :: Int
                  ,_amount :: Int
                  }
-  deriving stock Generic deriving (ToJSON, FromJSON)                 
+  deriving stock Generic deriving (ToJSON, FromJSON)
 
 data PostResponse = PostResponse {
                   _postResponse_id :: Int64
-                 ,_postResponse_image :: Bool
+                 ,_postResponse_image :: Text
                  ,_postResponse_content :: Text
                  ,_postResponse_datetime :: Time.LocalTime
                  }
